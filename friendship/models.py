@@ -58,98 +58,27 @@ def bust_cache(type, user_pk):
     cache.delete_many(keys)
 
 
-class FriendshipRequest(models.Model):
-    """ Model to represent friendship requests """
-    from_user = models.ForeignKey(AUTH_USER_MODEL, related_name='friendship_requests_sent')
-    to_user = models.ForeignKey(AUTH_USER_MODEL, related_name='friendship_requests_received')
+class FriendshipRequestManager(models.Manager):
 
-    message = models.TextField(_('Message'), blank=True)
-
-    created = models.DateTimeField(default=timezone.now)
-    rejected = models.DateTimeField(blank=True, null=True)
-    viewed = models.DateTimeField(blank=True, null=True)
-
-    class Meta:
-        verbose_name = _('Friendship Request')
-        verbose_name_plural = _('Friendship Requests')
-        unique_together = ('from_user', 'to_user')
-
-    def __unicode__(self):
-        return "User #%d friendship requested #%d" % (self.from_user_id, self.to_user_id)
-
-    def accept(self):
-        """ Accept this friendship request """
-        relation1 = Friend.objects.create(
-            from_user=self.from_user,
-            to_user=self.to_user
-        )
-
-        relation2 = Friend.objects.create(
-            from_user=self.to_user,
-            to_user=self.from_user
-        )
-
-        friendship_request_accepted.send(
-            sender=self,
-            from_user=self.from_user,
-            to_user=self.to_user
-        )
-
-        self.delete()
-        bust_cache('requests', self.to_user.pk)
-        bust_cache('friends', self.to_user.pk)
-        bust_cache('friends', self.from_user.pk)
-        return True
-
-    def reject(self):
-        """ reject this friendship request """
-        self.rejected = timezone.now()
-        friendship_request_rejected.send(sender=self)
-        self.save()
-        bust_cache('requests', self.to_user.pk)
-
-    def cancel(self):
-        """ cancel this friendship request """
-        self.delete()
-        friendship_request_canceled.send(sender=self)
-        bust_cache('requests', self.to_user.pk)
-        return True
-
-    def mark_viewed(self):
-        self.viewed = timezone.now()
-        friendship_request_viewed.send(sender=self)
-        self.save()
-        bust_cache('requests', self.to_user.pk)
-        return True
-
-
-class FriendshipManager(models.Manager):
-    """ Friendship manager """
-
-    def friends(self, user):
-        """ Return a list of all friends """
-        key = cache_key('friends', user.pk)
-        friends = cache.get(key)
-
-        if friends is None:
-            qs = Friend.objects.select_related(depth=1).filter(to_user=user).all()
-            friends = [u.from_user for u in qs]
-            cache.set(key, friends)
-
-        return friends
+    def are_request(self, to_user, from_user, **kwargs):
+        return self.filter(to_user=to_user, from_user=from_user, **kwargs).exists()
 
     def requests(self, user):
         """ Return a list of friendship requests """
-        key = cache_key('requests', user.pk)
-        requests = cache.get(key)
 
-        if requests is None:
-            qs = FriendshipRequest.objects.select_related(depth=1).filter(
-                to_user=user).all()
-            requests = list(qs)
-            cache.set(key, requests)
+        qs = FriendshipRequest.objects.filter(
+            to_user=user).all()
 
-        return requests
+        return qs
+
+    def active_requests(self, user, **kwargs):
+        """ Return a list of friendship requests """
+
+        qs = FriendshipRequest.objects.filter(
+            to_user=user, rejected__isnull=True, **kwargs)
+
+        return qs
+
 
     def sent_requests(self, user):
         """ Return a list of friendship requests from user """
@@ -157,7 +86,7 @@ class FriendshipManager(models.Manager):
         requests = cache.get(key)
 
         if requests is None:
-            qs = FriendshipRequest.objects.select_related(depth=1).filter(
+            qs = FriendshipRequest.objects.filter(
                     from_user=user).all()
             requests = list(qs)
             cache.set(key, requests)
@@ -236,6 +165,84 @@ class FriendshipManager(models.Manager):
         friendship_request_created.send(sender=request)
 
         return request
+
+
+class FriendshipRequest(models.Model):
+    """ Model to represent friendship requests """
+    from_user = models.ForeignKey(AUTH_USER_MODEL, related_name='friendship_requests_sent')
+    to_user = models.ForeignKey(AUTH_USER_MODEL, related_name='friendship_requests_received')
+
+    message = models.TextField(_('Message'), blank=True)
+
+    created = models.DateTimeField(default=timezone.now)
+    rejected = models.DateTimeField(blank=True, null=True)
+    viewed = models.DateTimeField(blank=True, null=True)
+
+    objects = FriendshipRequestManager()
+
+    class Meta:
+        verbose_name = _('Friendship Request')
+        verbose_name_plural = _('Friendship Requests')
+        unique_together = ('from_user', 'to_user')
+
+    def __unicode__(self):
+        return "User #%d friendship requested #%d" % (self.from_user_id, self.to_user_id)
+
+    def accept(self):
+        """ Accept this friendship request """
+        relation1 = Friend.objects.create(
+            from_user=self.from_user,
+            to_user=self.to_user
+        )
+
+        relation2 = Friend.objects.create(
+            from_user=self.to_user,
+            to_user=self.from_user
+        )
+
+        friendship_request_accepted.send(
+            sender=self,
+            from_user=self.from_user,
+            to_user=self.to_user
+        )
+
+        self.delete()
+        bust_cache('requests', self.to_user.pk)
+        bust_cache('friends', self.to_user.pk)
+        bust_cache('friends', self.from_user.pk)
+        return True
+
+    def reject(self):
+        """ reject this friendship request """
+        self.rejected = timezone.now()
+        friendship_request_rejected.send(sender=self)
+        self.save()
+        bust_cache('requests', self.to_user.pk)
+
+    def cancel(self):
+        """ cancel this friendship request """
+        self.delete()
+        friendship_request_canceled.send(sender=self)
+        bust_cache('requests', self.to_user.pk)
+        return True
+
+    def mark_viewed(self):
+        self.viewed = timezone.now()
+        friendship_request_viewed.send(sender=self)
+        self.save()
+        bust_cache('requests', self.to_user.pk)
+        return True
+
+
+class FriendshipManager(models.Manager):
+    """ Friendship manager """
+
+    def friends(self, user):
+        """ Return a list of all friends """
+
+        qs = Friend.objects.filter(to_user=user).all()
+
+        return qs
 
     def remove_friend(self, to_user, from_user):
         """ Destroy a friendship relationship """
