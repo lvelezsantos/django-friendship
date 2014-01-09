@@ -1,6 +1,8 @@
 django-friendship
 =================
 
+    Fork Django-Friendship (http://github.com/revsys/django-friendship)
+
 .. image:: https://secure.travis-ci.org/revsys/django-friendship.png
     :alt: Build Status
     :target: http://travis-ci.org/revsys/django-friendship
@@ -70,4 +72,4 @@ Signals
 Compatibility
 =============
 
-This package requires Django 1.4 since v0.9.0. The last release supporting Django 1.3 is v0.8.3.
+This package requires Django 1.6 since v0.9.0. The last release supporting Django 1.3 is v0.8.3.
