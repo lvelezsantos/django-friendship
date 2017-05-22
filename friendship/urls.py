@@ -1,10 +1,13 @@
-from django.conf.urls import url, patterns
+try:
+    from django.conf.urls import url
+except ImportError:
+    from django.conf.urls.defaults import url
 from friendship.views import view_friends, friendship_add_friend, friendship_accept, \
-        friendship_reject, friendship_cancel, friendship_request_list, \
-        friendship_request_list_rejected, friendship_requests_detail, followers,\
-        following, follower_add, follower_remove, all_users
+    friendship_reject, friendship_cancel, friendship_request_list, \
+    friendship_request_list_rejected, friendship_requests_detail, followers,\
+    following, follower_add, follower_remove, all_users
 
-urlpatterns = patterns('',
+urlpatterns = [
     url(
         regex=r'^users/$',
         view=all_users,
@@ -75,4 +78,4 @@ urlpatterns = patterns('',
         view=follower_remove,
         name='follower_remove',
     ),
-)
+]

@@ -20,8 +20,10 @@ def view_friends(request, username, template_name='friendship/friend/user_list.h
     """ View the friends of a user """
     user = get_object_or_404(user_model, username=username)
     friends = Friend.objects.friends(user)
-    return render(request, template_name, {get_friendship_context_object_name(): user, 'friends': friends})
-
+    return render(request, template_name, {
+        get_friendship_context_object_name(): user,
+        'friendship_context_object_name': get_friendship_context_object_name()
+    })
 
 
 @login_required
@@ -33,7 +35,7 @@ def friendship_add_friend(request, to_username, template_name='friendship/friend
         to_user = user_model.objects.get(username=to_username)
         from_user = request.user
         try:
-            FriendshipRequest.objects.add_friend(from_user, to_user)
+            Friend.objects.add_friend(from_user, to_user)
         except AlreadyExistsError as e:
             ctx['errors'] = ["%s" % e]
         else:
@@ -46,7 +48,9 @@ def friendship_add_friend(request, to_username, template_name='friendship/friend
 def friendship_accept(request, friendship_request_id):
     """ Accept a friendship request """
     if request.method == 'POST':
-        f_request = get_object_or_404(FriendshipRequest, id=friendship_request_id, to_user=request.user)
+        f_request = get_object_or_404(
+            request.user.friendship_requests_received,
+            id=friendship_request_id)
         f_request.accept()
         return redirect('friendship_view_friends', username=request.user.username)
 
@@ -57,7 +61,9 @@ def friendship_accept(request, friendship_request_id):
 def friendship_reject(request, friendship_request_id):
     """ Reject a friendship request """
     if request.method == 'POST':
-        f_request = get_object_or_404(FriendshipRequest, id=friendship_request_id, to_user=request.user)
+        f_request = get_object_or_404(
+            request.user.friendship_requests_received,
+            id=friendship_request_id)
         f_request.reject()
         return redirect('friendship_request_list')
 
@@ -68,7 +74,9 @@ def friendship_reject(request, friendship_request_id):
 def friendship_cancel(request, friendship_request_id):
     """ Cancel a previously created friendship_request_id """
     if request.method == 'POST':
-        f_request = get_object_or_404(FriendshipRequest, id=friendship_request_id)
+        f_request = get_object_or_404(
+            request.user.friendship_requests_sent,
+            id=friendship_request_id)
         f_request.cancel()
         return redirect('friendship_request_list')
 
@@ -78,8 +86,8 @@ def friendship_cancel(request, friendship_request_id):
 @login_required
 def friendship_request_list(request, template_name='friendship/friend/requests_list.html'):
     """ View unread and read friendship requests """
-
-    friendship_requests = FriendshipRequest.objects.active_requests(user=request.user)
+    # friendship_requests = Friend.objects.requests(request.user)
+    friendship_requests = FriendshipRequest.objects.filter(rejected__isnull=True)
 
     return render(request, template_name, {'requests': friendship_requests})
 
@@ -106,7 +114,10 @@ def followers(request, username, template_name='friendship/follow/followers_list
     user = get_object_or_404(user_model, username=username)
     followers = Follow.objects.followers(user)
 
-    return render(request, template_name, {get_friendship_context_object_name(): user, 'followers': followers})
+    return render(request, template_name, {
+        get_friendship_context_object_name(): user,
+        'friendship_context_object_name': get_friendship_context_object_name()
+    })
 
 
 def following(request, username, template_name='friendship/follow/following_list.html'):
@@ -114,7 +125,10 @@ def following(request, username, template_name='friendship/follow/following_list
     user = get_object_or_404(user_model, username=username)
     following = Follow.objects.following(user)
 
-    return render(request, template_name, {get_friendship_context_object_name(): user, 'following': following})
+    return render(request, template_name, {
+        get_friendship_context_object_name(): user,
+        'friendship_context_object_name': get_friendship_context_object_name()
+    })
 
 
 @login_required

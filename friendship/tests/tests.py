@@ -6,11 +6,12 @@ from django.db import IntegrityError
 from django.core.urlresolvers import reverse
 from django.test import TestCase
 
-from friendship.exceptions import AlreadyExistsError
+from friendship.exceptions import AlreadyExistsError, AlreadyFriendsError
 from friendship.models import Friend, Follow, FriendshipRequest
 
 
 TEST_TEMPLATES = os.path.join(os.path.dirname(__file__), 'templates')
+
 
 class login(object):
     def __init__(self, testcase, user, password):
@@ -86,8 +87,14 @@ class FriendshipModelTests(BaseTestCase):
         self.assertEqual(len(Friend.objects.requests(self.user_steve)), 1)
         self.assertEqual(len(Friend.objects.sent_requests(self.user_bob)), 1)
         self.assertEqual(len(Friend.objects.sent_requests(self.user_steve)), 0)
+
         self.assertEqual(len(Friend.objects.unread_requests(self.user_steve)), 1)
+        self.assertEqual(Friend.objects.unread_request_count(self.user_steve), 1)
+
         self.assertEqual(len(Friend.objects.rejected_requests(self.user_steve)), 0)
+
+        self.assertEqual(len(Friend.objects.unrejected_requests(self.user_steve)), 1)
+        self.assertEqual(Friend.objects.unrejected_request_count(self.user_steve), 1)
 
         # Ensure they aren't friends at this point
         self.assertFalse(Friend.objects.are_friends(self.user_bob, self.user_steve))
@@ -124,8 +131,6 @@ class FriendshipModelTests(BaseTestCase):
         req3.reject()
 
         # Duplicated requests raise a more specific subclass of IntegrityError.
-        with self.assertRaises(IntegrityError):
-            Friend.objects.add_friend(self.user_susan, self.user_amy)
         with self.assertRaises(AlreadyExistsError):
             Friend.objects.add_friend(self.user_susan, self.user_amy)
 
@@ -150,6 +155,50 @@ class FriendshipModelTests(BaseTestCase):
         # Ensure we can't do it manually either
         with self.assertRaises(ValidationError):
             Friend.objects.create(to_user=self.user_bob, from_user=self.user_bob)
+
+    def test_already_friends_with_request(self):
+        # Make Bob and Steve friends
+        req = Friend.objects.add_friend(self.user_bob, self.user_steve)
+        req.accept()
+
+        with self.assertRaises(AlreadyFriendsError):
+            req2 = Friend.objects.add_friend(self.user_bob, self.user_steve)
+
+    def test_multiple_friendship_requests(self):
+        """ Ensure multiple friendship requests are handled properly """
+        ### Bob wants to be friends with Steve
+        req1 = Friend.objects.add_friend(self.user_bob, self.user_steve)
+
+        # Ensure neither have friends already
+        self.assertEqual(Friend.objects.friends(self.user_bob), [])
+        self.assertEqual(Friend.objects.friends(self.user_steve), [])
+
+        # Ensure FriendshipRequest is created
+        self.assertEqual(FriendshipRequest.objects.filter(from_user=self.user_bob).count(), 1)
+        self.assertEqual(FriendshipRequest.objects.filter(to_user=self.user_steve).count(), 1)
+        self.assertEqual(Friend.objects.unread_request_count(self.user_steve), 1)
+
+        # Steve also wants to be friends with Bob before Bob replies
+        req2 = Friend.objects.add_friend(self.user_steve, self.user_bob)
+
+        # Ensure they aren't friends at this point
+        self.assertFalse(Friend.objects.are_friends(self.user_bob, self.user_steve))
+
+        # Accept the request
+        req1.accept()
+
+        # Ensure neither have pending requests
+        self.assertEqual(FriendshipRequest.objects.filter(from_user=self.user_bob).count(), 0)
+        self.assertEqual(FriendshipRequest.objects.filter(to_user=self.user_steve).count(), 0)
+        self.assertEqual(FriendshipRequest.objects.filter(from_user=self.user_steve).count(), 0)
+        self.assertEqual(FriendshipRequest.objects.filter(to_user=self.user_bob).count(), 0)
+
+    def test_multiple_calls_add_friend(self):
+        """ Ensure multiple calls with same friends, but different message works as expected """
+        req1 = Friend.objects.add_friend(self.user_bob, self.user_steve, message='Testing')
+
+        with self.assertRaises(AlreadyExistsError):
+            req2 = Friend.objects.add_friend(self.user_bob, self.user_steve, message='Foo Bar')
 
     def test_following(self):
         # Bob follows Steve
@@ -247,7 +296,6 @@ class FriendshipViewTests(BaseTestCase):
             redirect_url = reverse('friendship_request_list')
             self.assertTrue(redirect_url in response['Location'])
 
-
             response = self.client.post(url)
             self.assertResponse200(response)
             self.assertTrue('errors' in response.context)
@@ -297,6 +345,13 @@ class FriendshipViewTests(BaseTestCase):
             redirect_url = reverse('friendship_view_friends', kwargs={'username': self.user_bob.username})
             self.assertTrue(redirect_url in response['Location'])
 
+        with self.login(self.user_steve.username, self.user_pw):
+            # on POST try to accept the friendship request
+            # but I am logged in as Steve, so I cannot accept
+            # a request sent to Bob
+            response = self.client.post(url)
+            self.assertResponse404(response)
+
     def test_friendship_reject(self):
         url = reverse('friendship_reject', kwargs={'friendship_request_id': self.friendship_request.pk})
 
@@ -312,12 +367,19 @@ class FriendshipViewTests(BaseTestCase):
             redirect_url = reverse('friendship_requests_detail', kwargs={'friendship_request_id': self.friendship_request.pk})
             self.assertTrue(redirect_url in response['Location'])
 
-            # on POST accept the friendship request and redirect to the
+            # on POST reject the friendship request and redirect to the
             # friendship_requests view
             response = self.client.post(url)
             self.assertResponse302(response)
             redirect_url = reverse('friendship_request_list')
             self.assertTrue(redirect_url in response['Location'])
+
+        with self.login(self.user_steve.username, self.user_pw):
+            # on POST try to reject the friendship request
+            # but I am logged in as Steve, so I cannot reject
+            # a request sent to Bob
+            response = self.client.post(url)
+            self.assertResponse404(response)
 
     def test_friendship_cancel(self):
         url = reverse('friendship_cancel', kwargs={'friendship_request_id': self.friendship_request.pk})
@@ -334,7 +396,14 @@ class FriendshipViewTests(BaseTestCase):
             redirect_url = reverse('friendship_requests_detail', kwargs={'friendship_request_id': self.friendship_request.pk})
             self.assertTrue(redirect_url in response['Location'])
 
-            # on POST accept the friendship request and redirect to the
+            # on POST try to cancel the friendship request
+            # but I am logged in as Bob, so I cannot cancel
+            # a request made by Steve
+            response = self.client.post(url)
+            self.assertResponse404(response)
+
+        with self.login(self.user_steve.username, self.user_pw):
+            # on POST cancel the friendship request and redirect to the
             # friendship_requests view
             response = self.client.post(url)
             self.assertResponse302(response)
